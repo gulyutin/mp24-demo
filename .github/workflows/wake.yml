@@ -1,0 +1,41 @@
+# Будильник: раз в сутки запускает ежедневный прогон Медиаполе24 в частном репозитории media-pulse24.
+#
+# Зачем: GitHub не выполняет запуски по расписанию в частных репозиториях на бесплатном тарифе -
+# они пропускаются. В открытом репозитории расписание работает, поэтому будим прогон отсюда.
+#
+# Нужен секрет WAKE_TOKEN: токен доступа GitHub с правом «Actions: read and write»
+# на репозиторий gulyutin/media-pulse24. Ничего, кроме запуска прогона, он не позволяет.
+name: wake
+
+on:
+  schedule:
+    # 06:05, 06:25, 06:45 и 07:05 по Красноярску (UTC+7). Повторы на случай задержек GitHub:
+    # лишние запуски прогон пропускает сам («Уже собирали сегодня?»).
+    - cron: "5 23 * * *"
+    - cron: "25 23 * * *"
+    - cron: "45 23 * * *"
+    - cron: "5 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Разбудить ежедневный прогон
+        env:
+          TOKEN: ${{ secrets.WAKE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Нет секрета WAKE_TOKEN - добавьте его в настройках этого репозитория"; exit 1
+          fi
+          CODE=$(curl -sS -o /tmp/resp -w '%{http_code}' -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/gulyutin/media-pulse24/actions/workflows/daily.yml/dispatches \
+            -d '{"ref":"main","inputs":{"date":"today","collect":"true"}}')
+          if [ "$CODE" = "204" ]; then
+            echo "Прогон запущен: https://github.com/gulyutin/media-pulse24/actions"
+          else
+            echo "::error::GitHub ответил $CODE"; cat /tmp/resp; exit 1
+          fi
